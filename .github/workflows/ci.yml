@@ -1,0 +1,32 @@
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          check-latest: true
+          cache: false # zero dependencies: no go.sum to key a module cache on
+
+      - name: build
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+
+      - name: test (race + 100% coverage gate)
+        run: |
+          go test . -race -coverprofile=cover.out
+          total=$(go tool cover -func=cover.out | tail -n 1 | awk '{print $3}' | tr -d '%')
+          echo "coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { if (t+0 < 100.0) exit 1 }'
