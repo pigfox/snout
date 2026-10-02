@@ -120,14 +120,104 @@ An engaged session follows GA4: at least ten seconds of engaged time or at
 least two pageviews. Bounce rate is the share of sessions that were not
 engaged.
 
-## Grafana
+## Grafana Cloud setup
 
-1. Add a PostgreSQL data source with a role that can read the schema:
-   `GRANT USAGE ON SCHEMA snout`, `SELECT` on its tables and views.
-2. Dashboards → New → Import, upload `dashboards/overview.json`.
-3. Choose the data source. The `site` and `hostname` variables fill from the
-   data; `hostname` defaults to the production host, so staging traffic stays
-   out of the numbers unless you select it.
+The dashboard reads the views directly from Postgres, so Grafana needs a
+read-only database role and a network path to the database. The names below
+(`grafana_user`, `appdb`, `db.example.com`) are examples; substitute your own.
+
+### 1. A read-only role
+
+```sql
+CREATE ROLE grafana_user WITH LOGIN PASSWORD '<choose a password>';
+```
+
+On a managed Postgres service you may have to create the role in the
+provider's console instead; either way, give it no privileges beyond the
+grants below.
+
+### 2. Grants, in this order
+
+```sql
+-- Usually needs the database owner or an admin role, not the app user.
+GRANT CONNECT ON DATABASE appdb TO grafana_user;
+
+-- These can be run by the role that owns the snout schema (normally the role
+-- your migrations run as).
+GRANT USAGE ON SCHEMA snout TO grafana_user;
+GRANT SELECT ON ALL TABLES IN SCHEMA snout TO grafana_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA snout GRANT SELECT ON TABLES TO grafana_user;
+```
+
+`ALL TABLES` includes the views. The default-privileges line makes tables and
+views added to `snout` by a later version readable without another grant, but
+only for objects created by the role that runs it. Run it as the role that
+applies your migrations.
+
+### 3. Network allowlist
+
+If the database only accepts connections from listed addresses, add Grafana
+Cloud's outbound IPs:
+
+1. Find your stack's region: Grafana Cloud portal → your stack → **Grafana
+   Details**, the "cluster / region" value (for example `prod-us-west-0`).
+2. Fetch that region's egress list:
+   `https://allowlists.<region>.grafana.net/v1/grafana`, for example
+   `https://allowlists.prod-us-west-0.grafana.net/v1/grafana`. The response is
+   JSON; the addresses are in `service.ipv4`. Use the exact region from step 1:
+   a short slug such as `us` can return a different region's list.
+3. Add those addresses to the database's allowlist.
+
+Don't use the legacy global list (`grafana.com/api/hosted-grafana/source-ips.txt`).
+It covers every region and is deprecated after 2027-01-31.
+
+These addresses can change. If a working connection starts timing out,
+re-fetch the list and compare.
+
+### 4. The data source
+
+Connections → Data sources → Add → **PostgreSQL**:
+
+| Field | Value |
+| --- | --- |
+| Host | `db.example.com:5432`, host and port only, with no scheme and no database name |
+| Database | your app database, e.g. `appdb` |
+| User / Password | `grafana_user` and its password |
+| TLS/SSL Mode | `require` |
+| TLS/SSL Method | File system path, with every certificate field left empty |
+| Version | 15+ (or whatever your server runs) |
+| TimescaleDB | off |
+| Max open | `2`, or another low number |
+
+Keep **Max open** low. A managed Postgres plan has a fixed connection limit,
+and the app, its migrations and anything else on the cluster share it. A
+dashboard that opens a connection per panel can use up the connections the
+application needs. Two is plenty for one person refreshing a dashboard.
+
+**Save & test** should report success before you import anything.
+
+### 5. Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Save & test spins, then times out | Network: Grafana's IPs are not allowed through | Step 3. Re-fetch the list for your exact region |
+| `User does not have CONNECT privilege` | The CONNECT grant is missing | Run the first grant in step 2 as the database owner or an admin |
+| `password authentication failed` | Wrong or stale password | Click **Reset** on the password field and enter it again. A saved password can't be edited in place |
+| `permission denied for schema snout` | USAGE or SELECT is missing | Run the schema grants in step 2 as the schema's owner |
+
+### 6. Import the dashboard
+
+1. Dashboards → New → **Import dashboard**.
+2. Upload `dashboards/overview.json`.
+3. Pick the PostgreSQL data source from step 4.
+
+The `site` and `hostname` variables fill from the data. `hostname` defaults to
+the production host, so staging traffic stays out of the numbers unless you
+select it.
+
+**Data starts when snout is installed.** There is no backfill: traffic from
+before the collector was mounted was never recorded, and nothing here can
+reconstruct it. Compare against GA only over dates both were running.
 
 ## License
 
