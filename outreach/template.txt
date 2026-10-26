@@ -1,0 +1,13 @@
+Subject: Quick question for the {{.Agency}} team
+
+Hi {{.Agency}} team,
+
+<Write your pitch here: one or two sentences on what Trireens does and why it
+matters to an SEO agency like {{.Agency}}.>
+
+Would it be worth a 15-minute call next week?
+
+Best,
+<Your name>
+Trireens
+hello@trireens.com
