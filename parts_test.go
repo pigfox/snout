@@ -2,8 +2,10 @@ package snout
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -405,5 +407,44 @@ func TestSchemaAndScriptAreEmbedded(t *testing.T) {
 		if strings.Contains(js, banned) {
 			t.Errorf("Script must not use %q", banned)
 		}
+	}
+}
+
+// WEBDRIVER SKIP: an automated browser can send a plain Chrome User-Agent
+// that IsBot lets through, so the script itself must stay silent when
+// navigator.webdriver is true. It runs the real script in node with a stub
+// page; the same harness without webdriver must send, or the test proves
+// nothing.
+func TestScriptSendsNothingUnderWebdriver(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	src, _ := json.Marshal(string(Script))
+	harness := `
+const vm = require("vm");
+for (const webdriver of [true, false]) {
+  const sent = [];
+  const page = {
+    document: { currentScript: { getAttribute: () => "/_s" }, referrer: "", title: "T",
+      visibilityState: "visible", prerendering: false, addEventListener() {} },
+    navigator: { webdriver, sendBeacon: (u, b) => { sent.push(b); return true; } },
+    location: { pathname: "/", search: "?utm_source=x" },
+    screen: { width: 1280 },
+    URL, URLSearchParams, JSON, Date,
+  };
+  page.window = page;
+  vm.runInNewContext(` + string(src) + `, page);
+  page.window.snout.event("signup", { plan: "pro" });
+  console.log(webdriver + "=" + sent.length);
+}`
+	cmd := exec.Command(node, "-")
+	cmd.Stdin = strings.NewReader(harness)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "true=0\nfalse=2" {
+		t.Errorf("beacons sent (webdriver=count): %q, want true=0 and false=2 (pageview + event)", got)
 	}
 }

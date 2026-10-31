@@ -1,4 +1,4 @@
-/*! snout v0.1.0 | MIT | https://github.com/pigfox/snout
+/*! snout v0.1.1 | MIT | https://github.com/pigfox/snout
  * Cookieless first-party analytics. No cookies, no storage, no identifiers.
  * Load with: <script defer src="/js/snout.js" data-endpoint="/_s"></script>
  */
@@ -10,7 +10,14 @@
 
   var UTM = ["source", "medium", "campaign", "term", "content"];
 
+  // An automated browser (headless Chrome, Lighthouse, Playwright, Puppeteer)
+  // can send a plain browser User-Agent, so the server cannot tell it apart;
+  // it does set navigator.webdriver, and then nothing is sent. window.snout
+  // is still defined so a page calling snout.event() does not throw.
+  var robot = n.webdriver === true;
+
   function send(o) {
+    if (robot) return;
     try { n.sendBeacon(ep, JSON.stringify(o)); } catch (e) { /* never break the page */ }
   }
 

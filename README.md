@@ -45,8 +45,12 @@ its host, and screen width to a coarse bucket.
 - Sessions are tracked in memory, so a restart splits sessions that were open.
 - No country without a trusted upstream header (`Config.CountryHeader`); there
   is no GeoIP database.
-- Bots are filtered by User-Agent. A robot that lies about its User-Agent and
-  runs JavaScript is counted.
+- Bots are filtered by User-Agent on the server, and the script sends nothing
+  when `navigator.webdriver` is true. The User-Agent filter alone cannot catch
+  automated browsers: headless Chrome, Lighthouse 13, Playwright and Puppeteer
+  can send a plain Chrome User-Agent, so only the script's webdriver check
+  keeps them out. A robot that hides webdriver and lies about its User-Agent
+  is counted.
 
 ## Wire it
 

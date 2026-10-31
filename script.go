@@ -10,7 +10,9 @@ import _ "embed"
 // It sends a pageview with path, referrer host, UTM parameters, screen width
 // and title; an engagement beacon carrying visible time when the page is
 // hidden; and whatever window.snout.event(name, props) is called with. It
-// waits out prerendering, sets no cookie and touches no storage.
+// waits out prerendering, sets no cookie and touches no storage. It sends
+// nothing when navigator.webdriver is true: automated browsers such as
+// Lighthouse can send a plain Chrome User-Agent that IsBot cannot catch.
 //
 //go:embed snout.js
 var Script []byte
