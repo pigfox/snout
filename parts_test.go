@@ -317,12 +317,20 @@ func TestBatchFlushOnInterval(t *testing.T) {
 
 func TestShutdownFlushesEverything(t *testing.T) {
 	db := newFakeDB()
-	w := newWriter(db, 10, 2, time.Hour, nil)
-	// Queue before the loop starts, so close drains a backlog bigger than
-	// one batch: two full batches and a remainder.
-	for i := 0; i < 5; i++ {
+	w := newWriter(db, 64, 2, time.Hour, nil)
+	// Queue and signal done before the loop starts, so it drains a backlog
+	// bigger than one batch: full batches and a remainder. The loop still
+	// picks at random between the queue and done while both are ready, so
+	// the backlog is large: with 5 events it ate 4 before seeing done about
+	// one run in 16, and the drain's full-batch flush went uncovered. With
+	// 41 that takes 40 coin flips in a row.
+	const queued = 41
+	for i := 0; i < queued; i++ {
 		w.enqueue(Event{Type: "pageview", Path: "/"})
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = w.close(ctx) // closes done; the loop is not running yet
 	go w.run()
 	if err := w.close(context.Background()); err != nil {
 		t.Fatal(err)
@@ -330,8 +338,8 @@ func TestShutdownFlushesEverything(t *testing.T) {
 	if err := w.close(context.Background()); err != nil {
 		t.Fatal("second close must be harmless")
 	}
-	if w.written.Load() != 5 {
-		t.Errorf("written %d of 5", w.written.Load())
+	if w.written.Load() != queued {
+		t.Errorf("written %d of %d", w.written.Load(), queued)
 	}
 }
 
