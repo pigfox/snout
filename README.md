@@ -45,12 +45,22 @@ its host, and screen width to a coarse bucket.
 - Sessions are tracked in memory, so a restart splits sessions that were open.
 - No country without a trusted upstream header (`Config.CountryHeader`); there
   is no GeoIP database.
-- Bots are filtered by User-Agent on the server, and the script sends nothing
-  when `navigator.webdriver` is true. The User-Agent filter alone cannot catch
-  automated browsers: headless Chrome, Lighthouse 13, Playwright and Puppeteer
-  can send a plain Chrome User-Agent, so only the script's webdriver check
-  keeps them out. A robot that hides webdriver and lies about its User-Agent
-  is counted.
+- Bots are filtered by User-Agent on the server. The User-Agent filter alone
+  cannot catch automated browsers: headless Chrome, Lighthouse 13, Playwright
+  and Puppeteer can send a plain Chrome User-Agent (Lighthouse 13.5.0 sends a
+  moto g power Android UA on mobile and a macOS one on desktop). Two more
+  checks keep them out:
+  - the script sends nothing when `navigator.webdriver` is true, or when
+    `navigator.userAgentData.brands` has no GREASE brand (`Not(A:Brand` and
+    its variants);
+  - the collector drops a beacon whose `Sec-CH-UA` header lists brands but
+    no GREASE brand.
+
+  Every Chromium browser adds a GREASE brand; Lighthouse's emulated brand
+  list leaves it out. Firefox and Safari send no brand list and are judged
+  by User-Agent alone. A robot that hides webdriver, copies a real brand list
+  and lies about its User-Agent is counted. `SNOUT_BROWSER_TESTS=1 go test
+  -run Browser .` checks this against real Lighthouse 13.5.0 and real Chrome.
 
 ## Wire it
 

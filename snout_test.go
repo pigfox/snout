@@ -179,6 +179,32 @@ func TestEventAndEngagementPayloads(t *testing.T) {
 	}
 }
 
+// A beacon whose brand list has no GREASE entry is Lighthouse (or another
+// emulator) behind a plain Chrome User-Agent: dropped as a bot, never stored.
+func TestCollectorDropsEmulatedBrands(t *testing.T) {
+	db := newFakeDB()
+	tr, _ := newTracker(t, db, Config{})
+	for _, h := range []string{
+		`"Chromium";v="155", "Google Chrome";v="155"`,
+		`"Google Chrome";v="155", "Chromium";v="155", "Not(A:Brand";v="24"`,
+	} {
+		r := httptest.NewRequest(http.MethodPost, "https://example.com/_s", strings.NewReader(`{"t":"pageview","p":"/"}`))
+		r.Header.Set("User-Agent", chromeUA)
+		r.Header.Set("Sec-CH-UA", h)
+		w := httptest.NewRecorder()
+		tr.ServeHTTP(w, r)
+		if w.Code != http.StatusNoContent {
+			t.Errorf("%s: %d", h, w.Code)
+		}
+	}
+	if s := tr.Stats(); s.Bots != 1 || s.Accepted != 1 {
+		t.Errorf("bots %d accepted %d, want 1 and 1", s.Bots, s.Accepted)
+	}
+	if rows := flushed(t, tr, db); len(rows) != 1 {
+		t.Errorf("%d rows stored, want only the real Chrome one", len(rows))
+	}
+}
+
 func TestCollectorRefusals(t *testing.T) {
 	db := newFakeDB()
 	tr, _ := newTracker(t, db, Config{Hosts: []string{"Example.com"}, MaxBody: 64})

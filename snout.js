@@ -1,4 +1,4 @@
-/*! snout v0.1.1 | MIT | https://github.com/pigfox/snout
+/*! snout v0.1.2 | MIT | https://github.com/pigfox/snout
  * Cookieless first-party analytics. No cookies, no storage, no identifiers.
  * Load with: <script defer src="/js/snout.js" data-endpoint="/_s"></script>
  */
@@ -11,10 +11,14 @@
   var UTM = ["source", "medium", "campaign", "term", "content"];
 
   // An automated browser (headless Chrome, Lighthouse, Playwright, Puppeteer)
-  // can send a plain browser User-Agent, so the server cannot tell it apart;
-  // it does set navigator.webdriver, and then nothing is sent. window.snout
-  // is still defined so a page calling snout.event() does not throw.
-  var robot = n.webdriver === true;
+  // can send a plain browser User-Agent, so the User-Agent filter cannot tell
+  // it apart. It sets navigator.webdriver; and an emulated brand list, such as
+  // Lighthouse's phone or Mac, lacks the "Not.A.Brand" entry every Chromium
+  // build adds. Either way nothing is sent. window.snout is still defined so a
+  // page calling snout.event() does not throw.
+  var brands = n.userAgentData && n.userAgentData.brands;
+  var robot = n.webdriver === true || !!(brands && brands.length &&
+    !brands.some(function (b) { return /Not.A.Brand/.test(b.brand); }));
 
   function send(o) {
     if (robot) return;

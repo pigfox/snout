@@ -1,6 +1,9 @@
 package snout
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // botMarkers are lowercase User-Agent substrings that identify automated
 // clients: crawlers, link previewers, monitors, auditors and HTTP libraries.
@@ -27,6 +30,21 @@ func IsBot(userAgent string) bool {
 		}
 	}
 	return false
+}
+
+// greaseBrand matches the made-up brand every Chromium build adds to its
+// brand list ("Not(A:Brand", "Not_A Brand", " Not A;Brand") so servers do
+// not hard-code the list. Its punctuation varies by version.
+var greaseBrand = regexp.MustCompile(`Not.A.Brand`)
+
+// emulatedBrands reports whether a Sec-CH-UA header lists brands but no
+// GREASE brand. Real Chrome, Edge, Brave, Opera and Samsung Internet always
+// send one; a tool that rewrites the brand list, as Lighthouse does when it
+// emulates a phone or a Mac with a plain Chrome User-Agent, leaves it out.
+// An absent header (Firefox, Safari, an insecure origin) says nothing.
+func emulatedBrands(secCHUA string) bool {
+	s := strings.TrimSpace(secCHUA)
+	return s != "" && !greaseBrand.MatchString(s)
 }
 
 // deviceClass is GA's device category: mobile, tablet or desktop.

@@ -111,6 +111,30 @@ func TestIsBot(t *testing.T) {
 	}
 }
 
+// LIGHTHOUSE BRAND LIST: the Sec-CH-UA headers below are what Lighthouse
+// 13.5.0 (mobile and desktop) and real Chromium browsers sent to a local page.
+func TestEmulatedBrands(t *testing.T) {
+	for _, h := range []string{
+		`"Chromium";v="155", "Google Chrome";v="155"`, // Lighthouse 13.5.0, both presets
+		`"Chromium";v="128"`,
+	} {
+		if !emulatedBrands(h) {
+			t.Errorf("%s not flagged", h)
+		}
+	}
+	for _, h := range []string{
+		``, `  `, // Firefox, Safari, insecure origins: no header
+		`"Google Chrome";v="155", "Chromium";v="155", "Not(A:Brand";v="24"`, // Chrome 155
+		`"Microsoft Edge";v="141", "Not?A_Brand";v="8", "Chromium";v="141"`,
+		`"Chromium";v="128", "Not;A=Brand";v="24", "Brave";v="128"`,
+		`" Not A;Brand";v="99", "Chromium";v="90", "Google Chrome";v="90"`, // early GREASE
+	} {
+		if emulatedBrands(h) {
+			t.Errorf("%s flagged", h)
+		}
+	}
+}
+
 func TestDeviceBrowserOS(t *testing.T) {
 	cases := []struct{ ua, dev, br, os string }{
 		{chromeUA, "desktop", "Chrome", "macOS"},
@@ -410,12 +434,12 @@ func TestSchemaAndScriptAreEmbedded(t *testing.T) {
 	}
 }
 
-// WEBDRIVER SKIP: an automated browser can send a plain Chrome User-Agent
-// that IsBot lets through, so the script itself must stay silent when
-// navigator.webdriver is true. It runs the real script in node with a stub
-// page; the same harness without webdriver must send, or the test proves
-// nothing.
-func TestScriptSendsNothingUnderWebdriver(t *testing.T) {
+// AUTOMATED BROWSER SKIP: an automated browser can send a plain Chrome
+// User-Agent that IsBot lets through, so the script itself must stay silent
+// when navigator.webdriver is true or the brand list has no GREASE entry
+// (Lighthouse's emulated phone and Mac). It runs the real script in node with
+// a stub page; the real-browser cases must send, or the test proves nothing.
+func TestScriptSendsNothingFromAutomatedBrowsers(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not installed")
@@ -423,12 +447,21 @@ func TestScriptSendsNothingUnderWebdriver(t *testing.T) {
 	src, _ := json.Marshal(string(Script))
 	harness := `
 const vm = require("vm");
-for (const webdriver of [true, false]) {
+const chrome = [{ brand: "Google Chrome", version: "155" }, { brand: "Chromium", version: "155" }, { brand: "Not(A:Brand", version: "24" }];
+const lighthouse = [{ brand: "Chromium", version: "155" }, { brand: "Google Chrome", version: "155" }];
+const cases = {
+  webdriver: { webdriver: true, userAgentData: { brands: chrome } },
+  lighthouse: { webdriver: false, userAgentData: { brands: lighthouse } },
+  chrome: { webdriver: false, userAgentData: { brands: chrome } },
+  firefox: { webdriver: false },
+};
+for (const [name, nav] of Object.entries(cases)) {
   const sent = [];
+  nav.sendBeacon = (u, b) => { sent.push(b); return true; };
   const page = {
     document: { currentScript: { getAttribute: () => "/_s" }, referrer: "", title: "T",
       visibilityState: "visible", prerendering: false, addEventListener() {} },
-    navigator: { webdriver, sendBeacon: (u, b) => { sent.push(b); return true; } },
+    navigator: nav,
     location: { pathname: "/", search: "?utm_source=x" },
     screen: { width: 1280 },
     URL, URLSearchParams, JSON, Date,
@@ -436,7 +469,7 @@ for (const webdriver of [true, false]) {
   page.window = page;
   vm.runInNewContext(` + string(src) + `, page);
   page.window.snout.event("signup", { plan: "pro" });
-  console.log(webdriver + "=" + sent.length);
+  console.log(name + "=" + sent.length);
 }`
 	cmd := exec.Command(node, "-")
 	cmd.Stdin = strings.NewReader(harness)
@@ -444,7 +477,8 @@ for (const webdriver of [true, false]) {
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
-	if got := strings.TrimSpace(string(out)); got != "true=0\nfalse=2" {
-		t.Errorf("beacons sent (webdriver=count): %q, want true=0 and false=2 (pageview + event)", got)
+	want := "webdriver=0\nlighthouse=0\nchrome=2\nfirefox=2" // 2 = pageview + event
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Errorf("beacons sent:\n%s\nwant:\n%s", got, want)
 	}
 }

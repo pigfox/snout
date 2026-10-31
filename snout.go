@@ -209,7 +209,7 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ua := r.UserAgent()
-	if IsBot(ua) {
+	if IsBot(ua) || emulatedBrands(r.Header.Get("Sec-CH-UA")) {
 		t.bots.Add(1)
 		w.WriteHeader(http.StatusNoContent)
 		return
