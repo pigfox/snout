@@ -298,15 +298,15 @@ func TestSaltErrorDropsAndReports(t *testing.T) {
 }
 
 func TestCountryHeaderValidation(t *testing.T) {
-	tr := &Tracker{countryHeader: "X-C"}
-	for in, want := range map[string]string{"us": "US", "USA": "", "1A": "", "A1": "", "": "", "{a": ""} {
-		r := httptest.NewRequest(http.MethodPost, "/", nil)
-		r.Header.Set("X-C", in)
-		if got := tr.country(r); got != want {
+	for in, want := range map[string]string{"us": "US", " de ": "DE", "USA": "", "1A": "", "A1": "", "": "", "{a": "", "XX": "", "T1": ""} {
+		if got := cleanCountry(in); got != want {
 			t.Errorf("%q -> %q, want %q", in, got, want)
 		}
 	}
-	if (&Tracker{}).country(httptest.NewRequest(http.MethodPost, "/", nil)) != "" {
+	tr := &Tracker{}
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	r.Header.Set("X-C", "us")
+	if tr.location(r, testIP) != (location{}) {
 		t.Error("no header configured must store nothing")
 	}
 }

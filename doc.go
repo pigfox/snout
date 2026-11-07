@@ -10,9 +10,14 @@
 // where the salt is random, shared by every process through the snout.salt
 // table, and replaced at 00:00 UTC with the previous day's row deleted. No
 // cookie, no localStorage and no persistent identifier is ever set, and the raw
-// IP is used only inside that hash and the in-memory rate limiter: it is never
-// written to a row and never logged. The cost of that is stated rather than
-// hidden — a visitor who returns tomorrow is a new visitor.
+// IP is used only inside that hash, the in-memory rate limiter and the optional
+// in-memory location lookup (Config.GeoDB): it is never written to a row and
+// never logged. The cost of that is stated rather than hidden — a visitor who
+// returns tomorrow is a new visitor.
+//
+// Location is continent, country, region and city, from trusted upstream
+// headers (Cloudflare's, for example) or a local MaxMind-format database, and
+// never finer than a city.
 //
 // Events are buffered in memory and written in batches through the caller's
 // own pool (see DB), so snout never opens a connection of its own. A full

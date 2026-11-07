@@ -13,7 +13,7 @@ jobs:
         with:
           go-version: '1.23'
           check-latest: true
-          cache: false # zero dependencies: no go.sum to key a module cache on
+          cache: false # one small dependency; a module cache would save little
 
       - name: build
         run: go build ./...

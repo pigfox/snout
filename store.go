@@ -48,7 +48,10 @@ type Event struct {
 	Browser      string
 	OS           string
 	ScreenBucket string
-	Country      string
+	Continent    string // two-letter continent code
+	Country      string // ISO 3166-1 alpha-2
+	Region       string // subdivision name
+	City         string
 	EngagedMS    int64
 	Name         string
 	Props        string
@@ -59,7 +62,8 @@ var eventColumns = []string{
 	"site", "hostname", "ts", "visitor_hash", "session_id", "type", "path",
 	"title", "referrer_host", "utm_source", "utm_medium", "utm_campaign",
 	"utm_term", "utm_content", "device", "browser", "os", "screen_bucket",
-	"country", "engaged_ms", "event_name", "props",
+	"country", "engaged_ms", "event_name", "props", "continent", "region",
+	"city",
 }
 
 // nullable maps an empty string to SQL NULL, so a missing value is NULL in the
@@ -82,7 +86,8 @@ func eventArgs(e Event) []any {
 		nullable(e.UTMMedium), nullable(e.UTMCampaign), nullable(e.UTMTerm),
 		nullable(e.UTMContent), nullable(e.Device), nullable(e.Browser),
 		nullable(e.OS), nullable(e.ScreenBucket), nullable(e.Country), engaged,
-		nullable(e.Name), nullable(e.Props),
+		nullable(e.Name), nullable(e.Props), nullable(e.Continent),
+		nullable(e.Region), nullable(e.City),
 	}
 }
 

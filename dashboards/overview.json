@@ -2,7 +2,7 @@
   "title": "snout — overview",
   "uid": "snout-overview",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "time": {
     "from": "now-30d",
@@ -672,6 +672,201 @@
         "y": 39,
         "w": 8,
         "h": 9
+      }
+    },
+    {
+      "type": "table",
+      "title": "Users by continent",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT CASE continent WHEN 'AF' THEN 'Africa' WHEN 'AN' THEN 'Antarctica' WHEN 'AS' THEN 'Asia' WHEN 'EU' THEN 'Europe' WHEN 'NA' THEN 'North America' WHEN 'OC' THEN 'Oceania' WHEN 'SA' THEN 'South America' ELSE continent END AS continent, sum(users) AS users, sum(sessions) AS sessions FROM snout.daily_geo WHERE site = '$site' AND hostname = '$hostname' AND $__timeFilter(day) GROUP BY 1 ORDER BY users DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "id": 17,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 8,
+        "h": 10
+      }
+    },
+    {
+      "type": "geomap",
+      "title": "Users by country",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT country, sum(users) AS users, sum(sessions) AS sessions FROM snout.daily_geo WHERE site = '$site' AND hostname = '$hostname' AND $__timeFilter(day) AND country <> '(not set)' GROUP BY 1 ORDER BY users DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "view": {
+          "id": "zero",
+          "lat": 20,
+          "lon": 0,
+          "zoom": 1,
+          "allLayers": true
+        },
+        "controls": {
+          "showZoom": true,
+          "mouseWheelZoom": false,
+          "showAttribution": true
+        },
+        "basemap": {
+          "type": "osm-standard",
+          "name": "OpenStreetMap",
+          "config": {}
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Users",
+            "location": {
+              "mode": "lookup",
+              "lookup": "country",
+              "gazetteer": "public/gazetteer/countries.json"
+            },
+            "config": {
+              "style": {
+                "size": {
+                  "field": "users",
+                  "fixed": 5,
+                  "min": 4,
+                  "max": 30
+                },
+                "color": {
+                  "field": "users",
+                  "fixed": "dark-green"
+                },
+                "opacity": 0.6,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                }
+              },
+              "showLegend": true
+            },
+            "tooltip": true
+          }
+        ],
+        "tooltip": {
+          "mode": "details"
+        }
+      },
+      "id": 18,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 48,
+        "w": 16,
+        "h": 10
+      }
+    },
+    {
+      "type": "table",
+      "title": "Top countries",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT country, sum(users) AS users, sum(sessions) AS sessions, sum(engaged_sessions) AS engaged FROM snout.daily_geo WHERE site = '$site' AND hostname = '$hostname' AND $__timeFilter(day) GROUP BY 1 ORDER BY users DESC LIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "id": 19,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 58,
+        "w": 8,
+        "h": 10
+      }
+    },
+    {
+      "type": "table",
+      "title": "Top cities",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT city, region, country, sum(users) AS users, sum(sessions) AS sessions FROM snout.daily_geo WHERE site = '$site' AND hostname = '$hostname' AND $__timeFilter(day) AND city <> '(not set)' GROUP BY 1, 2, 3 ORDER BY users DESC LIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "id": 20,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 58,
+        "w": 16,
+        "h": 10
       }
     }
   ],

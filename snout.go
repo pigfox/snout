@@ -58,11 +58,36 @@ type Config struct {
 	Hosts []string
 	// ClientIP derives the client address. Default: the host part of
 	// RemoteAddr. Behind a proxy, pass the function the application already
-	// trusts. The value feeds the visitor hash and the rate limiter only.
+	// trusts. The value feeds the visitor hash, the rate limiter and the GeoDB
+	// lookup, in memory only.
 	ClientIP func(*http.Request) string
+
+	// Location: continent, country, region and city, no finer. Two sources,
+	// in order: trusted upstream headers, then GeoDB. The raw IP is used for
+	// the lookup in memory only; it is never stored or logged.
+	//
 	// CountryHeader names a trusted upstream header carrying an ISO 3166-1
-	// alpha-2 country code. Empty stores NULL.
+	// alpha-2 country code (Cloudflare: CloudflareCountryHeader). Empty reads
+	// no header.
 	CountryHeader string
+	// ContinentHeader, RegionHeader and CityHeader name trusted headers
+	// carrying a two-letter continent code, a region (subdivision) name and a
+	// city name. Each empty reads no header. The Cloudflare* constants hold
+	// Cloudflare's names.
+	ContinentHeader string
+	RegionHeader    string
+	CityHeader      string
+	// GeoDB is the path of a MaxMind-format (.mmdb) City or Country database,
+	// such as DB-IP's free "IP to City Lite" (CC BY 4.0; see the README for
+	// its attribution). It answers when the headers carry no country, and
+	// fills the finer fields the headers leave empty when it agrees on the
+	// country. The file is read into memory and read again when its size or
+	// modification time changes, checked every GeoDBCheck (default
+	// DefaultGeoDBCheck). A missing or unreadable file turns location off
+	// (NULLs) and is reported to OnError; it never stops the Tracker. Empty
+	// uses no database.
+	GeoDB      string
+	GeoDBCheck time.Duration
 
 	BufferSize    int           // events held in memory before dropping
 	BatchSize     int           // events per INSERT
@@ -94,13 +119,15 @@ type Stats struct {
 // Tracker is the collector: an http.Handler that accepts beacons, plus the
 // buffered writer behind it. Create it with New and stop it with Close.
 type Tracker struct {
-	site          string
-	hosts         map[string]bool
-	clientIP      func(*http.Request) string
-	countryHeader string
-	maxBody       int64
-	now           func() time.Time
-	onError       func(error)
+	site     string
+	hosts    map[string]bool
+	clientIP func(*http.Request) string
+	maxBody  int64
+	now      func() time.Time
+	onError  func(error)
+
+	countryHeader, continentHeader, regionHeader, cityHeader string
+	geo                                                      *geoDB // nil without Config.GeoDB
 
 	salter   *salter
 	sessions *sessions
@@ -119,12 +146,15 @@ func New(db DB, cfg Config) (*Tracker, error) {
 		return nil, errors.New("snout: Config.Site is required")
 	}
 	t := &Tracker{
-		site:          cfg.Site,
-		clientIP:      cfg.ClientIP,
-		countryHeader: cfg.CountryHeader,
-		maxBody:       orInt64(cfg.MaxBody, DefaultMaxBody),
-		now:           cfg.Now,
-		onError:       cfg.OnError,
+		site:            cfg.Site,
+		clientIP:        cfg.ClientIP,
+		countryHeader:   cfg.CountryHeader,
+		continentHeader: cfg.ContinentHeader,
+		regionHeader:    cfg.RegionHeader,
+		cityHeader:      cfg.CityHeader,
+		maxBody:         orInt64(cfg.MaxBody, DefaultMaxBody),
+		now:             cfg.Now,
+		onError:         cfg.OnError,
 	}
 	if t.clientIP == nil {
 		t.clientIP = remoteIP
@@ -161,13 +191,19 @@ func New(db DB, cfg Config) (*Tracker, error) {
 		done:         make(chan struct{}),
 		stopped:      make(chan struct{}),
 	}
+	if cfg.GeoDB != "" {
+		t.geo = openGeo(cfg.GeoDB, orDuration(cfg.GeoDBCheck, DefaultGeoDBCheck), t.onError)
+	}
 	go t.writer.run()
 	return t, nil
 }
 
-// Close writes every buffered event and stops the writer. It returns ctx's
-// error if the final flush outlives ctx.
+// Close stops the GeoDB watcher, writes every buffered event and stops the
+// writer. It returns ctx's error if the final flush outlives ctx.
 func (t *Tracker) Close(ctx context.Context) error {
+	if t.geo != nil {
+		t.geo.close()
+	}
 	return t.writer.close(ctx)
 }
 
@@ -249,22 +285,12 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e.Device = deviceClass(ua)
 	e.Browser = browserName(ua)
 	e.OS = osName(ua)
-	e.Country = t.country(r)
+	loc := t.location(r, ip)
+	e.Continent, e.Country, e.Region, e.City = loc.continent, loc.country, loc.region, loc.city
 
 	t.accepted.Add(1)
 	t.writer.enqueue(e)
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (t *Tracker) country(r *http.Request) string {
-	if t.countryHeader == "" {
-		return ""
-	}
-	c := strings.ToUpper(strings.TrimSpace(r.Header.Get(t.countryHeader)))
-	if len(c) != countryLen || c[0] < 'A' || c[0] > 'Z' || c[1] < 'A' || c[1] > 'Z' {
-		return ""
-	}
-	return c
 }
 
 // payload is what the script sends. Keys are short because every byte is in

@@ -386,8 +386,8 @@ func TestFailedBatchIsCountedAndReported(t *testing.T) {
 func TestInsertSQLShape(t *testing.T) {
 	sql := insertSQL(2)
 	n := len(eventColumns)
-	if !strings.Contains(sql, "($1, $2") || !strings.Contains(sql, "), ($23, ") ||
-		strings.Count(sql, "::jsonb") != 2 || !strings.HasSuffix(sql, "$44::jsonb)") || n != 22 {
+	if !strings.Contains(sql, "($1, $2") || !strings.Contains(sql, "), ($26, ") ||
+		strings.Count(sql, "::jsonb") != 2 || !strings.Contains(sql, "$47::jsonb, $48, $49, $50)") || n != 25 {
 		t.Errorf("%s", sql)
 	}
 	if err := insertEvents(context.Background(), newFakeDB(), nil); err != nil {
@@ -427,6 +427,18 @@ func TestSchemaAndScriptAreEmbedded(t *testing.T) {
 	for _, col := range eventColumns {
 		if !strings.Contains(Schema, "\n    "+col+" ") {
 			t.Errorf("insert column %q not in the events table", col)
+		}
+	}
+	// A v0.1.x table gains the v0.2.0 columns from the same idempotent text.
+	for _, col := range []string{"continent", "region", "city"} {
+		if !strings.Contains(Schema, "ALTER TABLE snout.events ADD COLUMN IF NOT EXISTS "+col+" text;") {
+			t.Errorf("no migration for column %q", col)
+		}
+	}
+	for _, banned := range []string{"lat", "latitude", "lon", "longitude", "postal", "postal_code", "ip"} {
+		if strings.Contains(Schema, "\n    "+banned+" ") || strings.Contains(Schema, "EXISTS "+banned+" ") ||
+			strings.Contains(strings.Join(eventColumns, ","), banned+",") {
+			t.Errorf("Schema must not store %q", banned)
 		}
 	}
 	js := string(Script)

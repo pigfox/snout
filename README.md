@@ -12,7 +12,9 @@ two can be compared like for like.
 go get github.com/pigfox/snout
 ```
 
-Standard library only.
+One dependency: [maxminddb-golang](https://github.com/oschwald/maxminddb-golang)
+v1 (pure Go), for the optional location database. Everything else is the
+standard library.
 
 ## The cookieless method
 
@@ -43,8 +45,11 @@ its host, and screen width to a coarse bucket.
   weekly or monthly "unique users" are a sum of daily ones and over-count.
 - Two people behind one IP with the same browser build are one visitor.
 - Sessions are tracked in memory, so a restart splits sessions that were open.
-- No country without a trusted upstream header (`Config.CountryHeader`); there
-  is no GeoIP database.
+- No location without a source: trusted upstream headers or a local
+  MaxMind-format database (see [Location](#location)). With neither, the
+  location columns are NULL. Location is never finer than a city, and an IP
+  database is wrong for some visitors (VPNs, mobile carriers, corporate
+  proxies), most often at city level.
 - Bots are filtered by User-Agent on the server. The User-Agent filter alone
   cannot catch automated browsers: headless Chrome, Lighthouse 13, Playwright
   and Puppeteer can send a plain Chrome User-Agent (Lighthouse 13.5.0 sends a
@@ -66,6 +71,11 @@ its host, and screen width to a coarse bucket.
 
 1. **Schema.** Apply `snout.Schema` (the same text as `schema.sql`) with your
    migration tool. Every statement is idempotent. snout never runs DDL itself.
+
+   **Upgrading from v0.1.x:** apply the v0.2.0 `snout.Schema` once more. It
+   only adds: the `continent`, `region` and `city` columns (existing rows read
+   NULL), the `snout.daily_geo` view, and the same three columns at the end of
+   `snout.sessions`. Existing queries and views keep working.
 
 2. **Adapt your pool.** snout asks for two methods, so it uses the pool you
    already have and never opens connections of its own. For pgx:
@@ -117,6 +127,75 @@ event and counts it in `Stats()`.
 Every row records the request's hostname, so a staging host that shares the
 database is separated by filtering on it — which the dashboard does.
 
+## Location
+
+Each row records where the visit came from: `continent` (two-letter code:
+AF, AN, AS, EU, NA, OC, SA), `country` (ISO 3166-1 alpha-2), `region` (the
+subdivision's name, such as a state) and `city` (name). Nothing finer:
+latitude, longitude and postal code are never read, so they are never stored.
+
+The raw IP is used for the lookup in memory, as it is for the visitor hash
+and the rate limiter. It is never written to a row or a log, and lookup
+errors, whose text can carry the IP, are dropped rather than passed to
+`OnError`.
+
+Two sources, in this order:
+
+1. **Trusted upstream headers.** `CountryHeader`, `ContinentHeader`,
+   `RegionHeader` and `CityHeader` name them. Behind Cloudflare:
+
+   ```go
+   snout.Config{
+       CountryHeader:   snout.CloudflareCountryHeader,   // CF-IPCountry, every plan
+       ContinentHeader: snout.CloudflareContinentHeader, // CF-IPContinent
+       RegionHeader:    snout.CloudflareRegionHeader,    // CF-Region
+       CityHeader:      snout.CloudflareCityHeader,      // CF-IPCity
+   }
+   ```
+
+   Cloudflare sends the last three only with the managed transform **Add
+   visitor location headers** on (Rules → Transform Rules → Managed
+   Transforms). Configure a header only if the origin accepts traffic from the
+   proxy alone; otherwise a visitor can write their own location. Invalid
+   values are dropped: a country that is not two letters, Cloudflare's `XX`
+   (unknown) and `T1` (Tor), a continent outside the seven codes, and names
+   that are not valid UTF-8 or contain control characters.
+
+2. **A local database file**, `Config.GeoDB`: the path of a MaxMind-format
+   `.mmdb` City (or Country) database. The intended file is DB-IP's free
+   [IP to City Lite](https://db-ip.com/db/download/ip-to-city-lite) mmdb,
+   refreshed monthly. MaxMind's GeoLite2 City works the same way, under its
+   own licence.
+
+   - It answers when the headers carry no country. When they do, it fills
+     only the fields the headers left empty, and only if it agrees on the
+     country, so a row never mixes two countries' places.
+   - The file is read into memory, not memory-mapped, so a file rewritten in
+     place can never crash a reader. Memory use is about the size of the
+     file, twice that briefly during a reload.
+   - Every `GeoDBCheck` (default one minute) snout compares the file's size
+     and modification time and reloads it when they change, without a
+     restart. To update it, download the new month's file and move it over
+     the old path (`mv` is atomic on one filesystem).
+   - A missing, unreadable or corrupt file turns location off (NULLs) and is
+     reported once to `OnError`; it never stops the collector. snout keeps
+     checking, and picks the file up when a good one appears.
+
+### Attribution (DB-IP Lite)
+
+DB-IP's Lite databases are licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). DB-IP asks that
+wherever its data is used, the site link to it, for example:
+
+```html
+<a href="https://db-ip.com">IP Geolocation by DB-IP</a>
+```
+
+snout never injects anything into pages, so it does not add this link. A site
+that uses the DB-IP file must add it itself (a footer or its privacy page are
+the usual places). Whether and where is the site owner's decision. Headers
+alone (Cloudflare) need no DB-IP attribution.
+
 ## Reports
 
 | View | GA4 equivalent |
@@ -128,6 +207,7 @@ database is separated by filtering on it — which the dashboard does.
 | `snout.daily_campaigns` | Session campaign |
 | `snout.daily_tech` | Tech details: device category, browser, OS |
 | `snout.daily_events` | Events |
+| `snout.daily_geo` | Demographic details: continent, country, region, city; NULL reads `(not set)` |
 | `snout.sessions` | (one row per session, the base of the above) |
 
 An engaged session follows GA4: at least ten seconds of engaged time or at
@@ -224,6 +304,11 @@ application needs. Two is plenty for one person refreshing a dashboard.
 1. Dashboards → New → **Import dashboard**.
 2. Upload `dashboards/overview.json`.
 3. Pick the PostgreSQL data source from step 4.
+
+The last row of panels shows location: users by continent, a geomap of
+users by country, and the top countries and cities, all with the same time
+range and hostname filter. The geomap draws OpenStreetMap tiles in the
+viewer's browser and needs no plugin or API key.
 
 The `site` and `hostname` variables fill from the data. `hostname` defaults to
 the production host, so staging traffic stays out of the numbers unless you

@@ -1,5 +1,7 @@
--- snout schema v0.1.0. Apply through your own migration tool; every statement
--- is idempotent so re-applying it is harmless.
+-- snout schema v0.2.0. Apply through your own migration tool; every statement
+-- is idempotent so re-applying it is harmless, and applying it over v0.1.x is
+-- the whole migration: it only adds columns and a view, and appends columns
+-- to snout.sessions.
 
 CREATE SCHEMA IF NOT EXISTS snout;
 
@@ -34,8 +36,18 @@ CREATE TABLE IF NOT EXISTS snout.events (
     country       text,
     engaged_ms    bigint,
     event_name    text,
-    props         jsonb
+    props         jsonb,
+    continent     text,
+    region        text,
+    city          text
 );
+
+-- v0.2.0: visitor location. Additive, so v0.1.x tables gain the columns and
+-- their rows read NULL. Location is no finer than a city: snout never stores
+-- latitude, longitude or a postal code.
+ALTER TABLE snout.events ADD COLUMN IF NOT EXISTS continent text;
+ALTER TABLE snout.events ADD COLUMN IF NOT EXISTS region text;
+ALTER TABLE snout.events ADD COLUMN IF NOT EXISTS city text;
 
 CREATE INDEX IF NOT EXISTS events_site_host_ts_idx ON snout.events (site, hostname, ts);
 CREATE INDEX IF NOT EXISTS events_session_idx ON snout.events (session_id);
@@ -65,7 +77,12 @@ SELECT
     (array_agg(os ORDER BY ts))[1]                                            AS os,
     (array_agg(country ORDER BY ts))[1]                                       AS country,
     (coalesce(sum(engaged_ms), 0) >= 10000
-        OR count(*) FILTER (WHERE type = 'pageview') >= 2)                    AS engaged
+        OR count(*) FILTER (WHERE type = 'pageview') >= 2)                    AS engaged,
+    -- v0.2.0 columns go last: CREATE OR REPLACE VIEW can only append. All
+    -- four come from the session's first event, so they never mix sources.
+    (array_agg(continent ORDER BY ts))[1]                                     AS continent,
+    (array_agg(region ORDER BY ts))[1]                                        AS region,
+    (array_agg(city ORDER BY ts))[1]                                          AS city
 FROM snout.events
 GROUP BY site, hostname, session_id;
 
@@ -152,3 +169,14 @@ SELECT (ts AT TIME ZONE 'UTC')::date AS day, site, hostname, event_name AS name,
 FROM snout.events
 WHERE type = 'event'
 GROUP BY 1, 2, 3, 4;
+
+-- GA's "Demographic details" by location: continent, country, region, city.
+-- NULLs are reported as (not set), as GA does.
+CREATE OR REPLACE VIEW snout.daily_geo AS
+SELECT (started AT TIME ZONE 'UTC')::date AS day, site, hostname,
+       coalesce(continent, '(not set)') AS continent, coalesce(country, '(not set)') AS country,
+       coalesce(region, '(not set)') AS region, coalesce(city, '(not set)') AS city,
+       count(*) AS sessions, count(DISTINCT visitor_hash) AS users,
+       count(*) FILTER (WHERE engaged) AS engaged_sessions
+FROM snout.sessions
+GROUP BY 1, 2, 3, 4, 5, 6, 7;
